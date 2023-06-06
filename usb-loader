@@ -1,0 +1,235 @@
+#!/bin/bash
+
+START=$(date +%s)
+
+# string formatters
+if [[ -t 1 ]]; then tty_escape() { printf "\033[%sm" "$1"; }; else tty_escape() { :; }; fi
+tty_mkbold() { tty_escape "1;$1"; }
+tty_underline="$(tty_escape "4;39")"
+tty_blue="$(tty_mkbold 34)"
+tty_red="$(tty_mkbold 31)"
+tty_bold="$(tty_mkbold 39)"
+tty_reset="$(tty_escape 0)"
+shell_join() { local arg; printf "%s" "$1"; shift; for arg in "$@"; do printf " ";   printf "%s" "${arg// /\ }"; done }
+chomp() { printf "%s" "${1/"$'\n'"/}"; }
+ohai() { printf "${tty_blue}==>${tty_bold} %s${tty_reset}\n" "$(shell_join "$@")"; }
+warn() { printf "${tty_red}Warning${tty_reset}: %s\n" "$(chomp "$1")" >&2; }
+fail() { printf "    ${tty_red}Fail${tty_reset} : %s\n" "$(chomp "$1")" >&2; echo; }
+
+# Utils
+ring_bell() { if [[ -t 1 ]]; then printf "\a"; fi }
+execute() { if ! "$@" | sed 's/^/    /'; then warn "Process failed: $(shell_join "$@")"; fi }
+quiet_execute() { "$@" &>/dev/null; }
+wait_execute() { "$@" | sed 's/^/    /' & PIDS+=("$!") PID_STATUS+=("$?"); }
+mount () { quiet_execute "diskutil" "mount" "/dev/${1}"; echo ; echo "Mounting drive ${2} ${tty_blue}==>${tty_reset} Mounted"; echo; }
+unmount () { quiet_execute "diskutil" "unmount" "/dev/${1}"; echo; echo "Unmounting drive ${2} ${tty_blue}==>${tty_reset} Unmounted"; echo; }
+min_sec() { printf "%dm %ds" "$((10#$1 / 60))" "$((10#$1 % 60))"; }
+ret () {
+  return 0
+}
+
+mount_command () {
+  VOLUMES=($(diskutil list | grep "${NEW_NAME}" | awk "${ID_NUM}"))
+  for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
+    execute "diskutil" "mount" "/dev/${VOLUMES[$i]}"
+  done
+  ring_bell
+  echo
+  exit 0
+}
+
+wipe_command () {
+  VOLUMES=($(diskutil list | grep "${IDENTIFIER}" | awk "${ID_NUM}"))
+  for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
+    execute "mount" "${VOLUMES[$i]}" 
+    execute "diskutil" "eraseDisk" "FAT32" "${NEW_NAME}" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
+  done
+  ring_bell
+  echo
+  exit 0
+}
+
+file_num_check () {
+  # Count files on disk
+  LIST_FILES=($(ls "/Volumes/${TEMP_MAME}"))
+  [ "${#LIST_FILES[@]}" -gt "1" ] && fail "Too many files on drive ${DISK_NUM}: Count ${#LIST_FILES[@]}" && TOO_MANY_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
+  [ "${#LIST_FILES[@]}" -lt "1" ] && fail "Too few files on drive ${DISK_NUM}: Count ${#LIST_FILES[@]}" && TOO_FEW_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
+  echo "    Total files on drive ${DISK_NUM}          : ${#LIST_FILES[@]}"
+}
+
+find_file_check () {
+  FILE_COUNT=($(ls "/Volumes/${TEMP_MAME}/${FILE_PATH}" 2> /dev/null))
+  [ "${#FILE_COUNT[@]}" -gt "1" ] && fail "Too many copied files on drive ${DISK_NUM}: Count ${FILE_COUNT}" && TOO_MANY_BIN_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
+  [ "${#FILE_COUNT[@]}" -lt "1" ] && fail "Too few copied files on drive ${DISK_NUM}: Count ${FILE_COUNT}" && TOO_FEW_BIN_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
+  echo "    Total copied files on drive ${DISK_NUM}     : ${#FILE_COUNT[@]}"
+}
+
+file_size_check () {
+  FILE_SIZE=0
+  FILE_SIZE=$(wc -c "/Volumes/${TEMP_MAME}/${FILE_PATH}" | awk '{print $1}')
+  READ_FILE_SIZE=$(printf %.1f\\n "$(( 10**9 * FILE_SIZE/1000000 ))e-9")
+  [ $FILE_SIZE != $FILE_SIZE ] && fail "Copied file on drive ${DISK_NUM} is wrong file size: ${READ_FILE_SIZE}" && BIN_FILE_WRONG_SIZE+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
+  echo "    Size of copied file on drive ${DISK_NUM}    : ${READ_FILE_SIZE} MB"
+}
+
+# Env Parameters
+PIDS=()
+PID_STATUS=()
+BASE="${0}"
+FILE_PATH="${1:-}"
+[ -n "${FILE_SIZE}" ] && FILE_SIZE=$(wc -c "./$FILE_PATH" | awk '{print $1}')
+NEW_NAME="${2:-}"
+IDENTIFIER="${3:-"${NEW_NAME}"}"
+ID_SPACE_COUNT=$(echo "${IDENTIFIER}" | head -n 1 | tr -cd ' \t' | wc -c)
+ID_NUM=$(printf '{print $%s}\n' "$(( 6+${ID_SPACE_COUNT} ))")
+
+#  Mount command
+if [ "${FILE_PATH}" == "mount" ] && [ -n "${NEW_NAME}" ]; then
+  mount_command
+fi 
+
+#  Wipe command
+if [ "${1}" == "wipe" ] && [ -n "${NEW_NAME}" ]; then
+  wipe_command
+fi
+
+if [ -n "${FILE_PATH}" ] && [ -n "${NEW_NAME}" ] && [ -n "${IDENTIFIER}" ]; then
+  if ! [ -f "${FILE_PATH}" ]; then
+    warn "No such file: ${FILE_PATH}"; ring_bell; exit 1
+  fi
+else
+  warn "${BASE} requires a all arguments: ${BASE} <file_name> <new_usb_drive_name> <drive_identifier>"; exit 1
+fi
+
+if [ -d '/Volumes' ]; then 
+  VOLUMES=($(diskutil list | grep "${IDENTIFIER}" | awk "${ID_NUM}"))
+else
+  ring_bell; warn "No such directory: /Volumes"; exit 1
+fi
+
+#  List disks attached 
+echo
+ohai "Finding connected USB drives named ${IDENTIFIER}:"
+echo "    ${tty_bold}${#VOLUMES[@]}${tty_reset} USB drives named ${tty_bold}${IDENTIFIER}${tty_reset} detected"
+
+# Unmount all disks
+for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
+  DISK_NUM=$(( i+1 ))
+  unmount "${VOLUMES[$i]}" "${DISK_NUM}"
+done
+
+# Process disks
+READY=()
+OK=()
+FAILED=()
+START_WITH_FILES=()
+TOO_MANY_FILES=()
+TOO_FEW_FILES=()
+TOO_MANY_BIN_FILES=()
+TOO_FEW_BIN_FILES=()
+BIN_FILE_WRONG_SIZE=()
+for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
+  DISK_NUM=$(( i+1 ))
+
+  # Check for files on disk
+  echo
+  ohai "Preparing drive ${DISK_NUM} of ${#VOLUMES[@]}"
+  mount "${VOLUMES[$i]}" "${DISK_NUM}"
+  echo "    Checking for files on drive ${DISK_NUM}"
+  LIST_FILES=($(ls "/Volumes/${IDENTIFIER}"))
+  [ "${#LIST_FILES[@]}" -gt "0" ] && warn "Aborted: Disk ${DISK_NUM} is not empty." && echo "    Files found: 
+        ${LIST_FILES[@]}" && START_WITH_FILES+=(${VOLUMES[$i]}) FAILED+=(${VOLUMES[$i]}) && unmount ${VOLUMES[$i]} ${DISK_NUM} && continue
+
+  # Erase, format and temp rename disks
+  TEMP_MAME=$(echo "${VOLUMES[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+  echo "    Erasing, reformating (FAT32) and renaming drive ${DISK_NUM} ${tty_blue}==>${tty_reset} temporary name: ${TEMP_MAME}"
+  execute "diskutil" "eraseDisk" "FAT32" "$TEMP_MAME" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
+  
+  READY+=(${VOLUMES[$i]})
+  echo
+  echo "    ${tty_bold}*** Drive ${DISK_NUM} is Ready! ***${tty_reset}"
+done
+
+echo
+
+# Load files onto disks
+for ((i = 0; i < ${#READY[@]}; i++)); do
+  DISK_NUM=$(( i+1 ))
+  TEMP_MAME=$(echo "${READY[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+  ohai "Start copying ${FILE_PATH} to drive ${DISK_NUM} of ${#READY[@]}"
+  cp -f "./${FILE_PATH}" "/Volumes/${TEMP_MAME}" &
+  PIDS+=("$!")
+  echo
+done
+
+wait ${PIDS[@]}
+
+# Check drives 
+for ((i = 0; i < ${#READY[@]}; i++)); do
+  ohai "Quality control check on drive ${DISK_NUM} of ${#READY[@]}"
+  echo
+  DISK_NUM=$(( i+1 ))
+  TEMP_MAME=$(echo "${READY[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+
+  # Count files on disk
+  file_num_check
+
+  # Check for .bin file on disk
+  find_file_check
+
+  # Check .bin file size
+  file_size_check
+
+  echo
+  echo "    ${tty_bold}*** Pass! ***${tty_reset}"
+  echo
+  OK+=(${READY[$i]})
+done
+
+# Wrap it up
+for ((i = 0; i < ${#OK[@]}; i++)); do
+  DISK_NUM=$(( i+1 ))
+  ohai "Renaming drive ${DISK_NUM} to ${NEW_NAME}"
+  execute "diskutil" "rename" "${OK[$i]}" "${NEW_NAME}"
+  unmount "${OK[$i]}" "${DISK_NUM}"
+  echo
+done
+
+for ((i = 0; i < ${#FAILED[@]}; i++)); do
+  DISK_NUM=$(( i+1 ))
+  ohai "Renaming drive ${DISK_NUM} to ${IDENTIFIER}"
+  mount "${FAILED[$i]}" "${DISK_NUM}"
+  execute "diskutil" "rename" "${FAILED[$i]}" "${IDENTIFIER}"
+  unmount "${FAILED[$i]}" "${DISK_NUM}"
+  echo
+done
+
+
+ohai "Transfer attempt complete!"
+echo
+echo "    ${tty_bold}Successfull transfers :${tty_reset} ${#OK[@]}"
+echo
+if [ ${#FAILED[@]} -gt "0" ]; then
+  warn "Failed transfers: ${#FAILED[@]}"
+  echo
+  [ ${#START_WITH_FILES[@]}    -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had files to start :${tty_reset} ${tty_red}${#START_WITH_FILES[@]}${tty_reset}"
+  [ ${#TOO_MANY_FILES[@]}      -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had too many files :${tty_reset} ${tty_red}${#TOO_MANY_FILES[@]}${tty_reset}"
+  [ ${#TOO_FEW_FILES[@]}       -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had too few files :${tty_reset} ${tty_red}${#TOO_FEW_FILES[@]}${tty_reset}"
+  [ ${#TOO_MANY_BIN_FILES[@]}  -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had too many BIN files :${tty_reset} ${tty_red}${#TOO_MANY_BIN_FILES[@]}${tty_reset}"
+  [ ${#TOO_FEW_BIN_FILES[@]}   -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had too few BIN files :${tty_reset} ${tty_red}${#TOO_FEW_BIN_FILES[@]}${tty_reset}"
+  [ ${#BIN_FILE_WRONG_SIZE[@]} -gt "0" ] && echo "    ${tty_bold}Failed Check because BIN file was the wrong size :${tty_reset} ${tty_red}${#BIN_FILE_WRONG_SIZE[@]}${tty_reset}"
+  echo
+  echo "    run. :  ${0} wipe ${IDENTIFIER} ${IDENTIFIER} 
+    ${tty_bold}THIS WILL ${tty_red}DELETE${tty_reset} ${tty_bold}ALL FILES ON ALL DRIVES NAMED ${IDENTIFIER}${tty_reset}"
+  echo
+fi
+
+ring_bell
+TOTAL_TIME=$(( $(date +%s )-START ))
+[ ${#OK[@]} -gt "0" ] && TIME_PER_FILE="    |    Time per copy : $(min_sec $(( TOTAL_TIME/${#OK[@]} )))"
+[ ${#OK[@]} -lt "1" ] && TIME_PER_FILE=""
+ohai "DONE    |    Total run time : $(min_sec ${TOTAL_TIME})${TIME_PER_FILE}"
+echo
+
+[ ${#FAILED[@]} -gt "0" ] && exit 1
+exit 0
