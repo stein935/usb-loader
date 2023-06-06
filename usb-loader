@@ -21,12 +21,9 @@ ring_bell() { if [[ -t 1 ]]; then printf "\a"; fi }
 execute() { if ! "$@" | sed 's/^/    /'; then warn "Process failed: $(shell_join "$@")"; fi }
 quiet_execute() { "$@" &>/dev/null; }
 wait_execute() { "$@" | sed 's/^/    /' & PIDS+=("$!") PID_STATUS+=("$?"); }
-mount () { quiet_execute "diskutil" "mount" "/dev/${1}"; echo ; echo "Mounting drive ${2} ${tty_blue}==>${tty_reset} Mounted"; echo; }
-unmount () { quiet_execute "diskutil" "unmount" "/dev/${1}"; echo; echo "Unmounting drive ${2} ${tty_blue}==>${tty_reset} Unmounted"; echo; }
+mount () { quiet_execute "diskutil" "mount" "/dev/${1}"; echo "    Mounting drive ${2} ${tty_blue}==>${tty_reset} Mounted"; echo; }
+unmount () { quiet_execute "diskutil" "unmount" "/dev/${1}"; echo "    Unmounting drive ${2} ${tty_blue}==>${tty_reset} Unmounted"; echo; }
 min_sec() { printf "%dm %ds" "$((10#$1 / 60))" "$((10#$1 % 60))"; }
-ret () {
-  return 0
-}
 
 mount_command () {
   VOLUMES=($(diskutil list | grep "${NEW_NAME}" | awk "${ID_NUM}"))
@@ -49,12 +46,15 @@ wipe_command () {
   exit 0
 }
 
+./usb-loader ELTE11MWR_6.0p6s2_PROD_sdy-signed.bin "XUMO TV" "TEST"
+./usb-loader ELTE11MWR_6.0p6s2_PROD_sdy-signed.bin "XUMO TV" "FOO" 
+
 file_num_check () {
   # Count files on disk
   LIST_FILES=($(ls "/Volumes/${TEMP_MAME}"))
   [ "${#LIST_FILES[@]}" -gt "1" ] && fail "Too many files on drive ${DISK_NUM}: Count ${#LIST_FILES[@]}" && TOO_MANY_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
   [ "${#LIST_FILES[@]}" -lt "1" ] && fail "Too few files on drive ${DISK_NUM}: Count ${#LIST_FILES[@]}" && TOO_FEW_FILES+=(${READY[$i]}) FAILED+=(${READY[$i]}) && continue
-  echo "    Total files on drive ${DISK_NUM}          : ${#LIST_FILES[@]}"
+  echo "    Total files on drive ${DISK_NUM}            : ${#LIST_FILES[@]}"
 }
 
 find_file_check () {
@@ -84,12 +84,18 @@ ID_SPACE_COUNT=$(echo "${IDENTIFIER}" | head -n 1 | tr -cd ' \t' | wc -c)
 ID_NUM=$(printf '{print $%s}\n' "$(( 6+${ID_SPACE_COUNT} ))")
 
 #  Mount command
+if [ "${FILE_PATH}" == "test" ]; then
+  ohai "    Woohoo! You're good to go."
+  exit 0
+fi 
+
+#  Mount command
 if [ "${FILE_PATH}" == "mount" ] && [ -n "${NEW_NAME}" ]; then
   mount_command
 fi 
 
 #  Wipe command
-if [ "${1}" == "wipe" ] && [ -n "${NEW_NAME}" ]; then
+if [ "${FILE_PATH}" == "wipe" ] && [ -n "${NEW_NAME}" ]; then
   wipe_command
 fi
 
@@ -111,6 +117,7 @@ fi
 echo
 ohai "Finding connected USB drives named ${IDENTIFIER}:"
 echo "    ${tty_bold}${#VOLUMES[@]}${tty_reset} USB drives named ${tty_bold}${IDENTIFIER}${tty_reset} detected"
+echo
 
 # Unmount all disks
 for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
