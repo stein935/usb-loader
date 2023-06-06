@@ -27,6 +27,7 @@ min_sec() { printf "%dm %ds" "$((10#$1 / 60))" "$((10#$1 % 60))"; }
 
 mount_command () {
   VOLUMES=($(diskutil list | grep "${NEW_NAME}" | awk "${ID_NUM}"))
+  echo
   for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
     execute "diskutil" "mount" "/dev/${VOLUMES[$i]}"
   done
@@ -37,17 +38,15 @@ mount_command () {
 
 wipe_command () {
   VOLUMES=($(diskutil list | grep "${IDENTIFIER}" | awk "${ID_NUM}"))
+  echo
   for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
-    execute "mount" "${VOLUMES[$i]}" 
+    mount "${VOLUMES[$i]}" 
     execute "diskutil" "eraseDisk" "FAT32" "${NEW_NAME}" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
   done
   ring_bell
   echo
   exit 0
 }
-
-./usb-loader ELTE11MWR_6.0p6s2_PROD_sdy-signed.bin "XUMO TV" "TEST"
-./usb-loader ELTE11MWR_6.0p6s2_PROD_sdy-signed.bin "XUMO TV" "FOO" 
 
 file_num_check () {
   # Count files on disk
