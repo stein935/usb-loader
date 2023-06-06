@@ -175,9 +175,6 @@ for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
         ${LIST_FILES[@]}"
     echo 
     echo "    ${tty_bold}${tty_red}DELETEING${tty_reset} ${tty_bold}ALL FILES ON drive ${DISK_NUM} of ${#VOLUMES[@]}"
-    mount "${VOLUMES[$i]}"
-    execute "diskutil" "eraseDisk" "FAT32" "${IDENTIFIER}" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
-    unmount "${VOLUMES[$i]}"
   fi
 
   # Erase, format and temp rename disks
@@ -195,7 +192,7 @@ echo
 # Load files onto disks
 for ((i = 0; i < ${#READY[@]}; i++)); do
   DISK_NUM=$(( i+1 ))
-  TEMP_MAME=$(echo "${READY[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+  TEMP_MAME=$(echo "${READY[$i]}" | tr '[:lower:]' '[:upper:]')
   ohai "Start copying ${FILE_PATH} to drive ${DISK_NUM} of ${#READY[@]}"
   cp -f "./${FILE_PATH}" "/Volumes/${TEMP_MAME}" &
   PIDS+=("$!")
@@ -209,7 +206,7 @@ for ((i = 0; i < ${#READY[@]}; i++)); do
   ohai "Quality control check on drive ${DISK_NUM} of ${#READY[@]}"
   echo
   DISK_NUM=$(( i+1 ))
-  TEMP_MAME=$(echo "${READY[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+  TEMP_MAME=$(echo "${READY[$i]}" | tr '[:lower:]' '[:upper:]')
 
   # Count files on disk
   file_num_check
