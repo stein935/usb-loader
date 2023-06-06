@@ -169,11 +169,19 @@ for ((i = 0; i < ${#VOLUMES[@]}; i++)); do
   mount "${VOLUMES[$i]}" "${DISK_NUM}"
   echo "    Checking for files on drive ${DISK_NUM}"
   LIST_FILES=($(ls "/Volumes/${IDENTIFIER}"))
-  [ "${#LIST_FILES[@]}" -gt "0" ] && warn "Aborted: Disk ${DISK_NUM} is not empty." && echo "    Files found: 
-        ${LIST_FILES[@]}" && START_WITH_FILES+=(${VOLUMES[$i]}) FAILED+=(${VOLUMES[$i]}) && unmount ${VOLUMES[$i]} ${DISK_NUM} && continue
+  if [ "${#LIST_FILES[@]}" -gt "0" ]; then 
+		warn "Disk ${DISK_NUM} is not empty. "
+		echo "    Files found: 
+        ${LIST_FILES[@]}"
+    echo 
+    echo "    ${tty_bold}${tty_red}DELETEING${tty_reset} ${tty_bold}ALL FILES ON drive ${DISK_NUM} of ${#VOLUMES[@]}"
+    mount "${VOLUMES[$i]}"
+    execute "diskutil" "eraseDisk" "FAT32" "${IDENTIFIER}" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
+    unmount "${VOLUMES[$i]}"
+  fi
 
   # Erase, format and temp rename disks
-  TEMP_MAME=$(echo "${VOLUMES[$i]}-TMP" | tr '[:lower:]' '[:upper:]')
+  TEMP_MAME=$(echo "${VOLUMES[$i]}" | tr '[:lower:]' '[:upper:]')
   echo "    Erasing, reformating (FAT32) and renaming drive ${DISK_NUM} ${tty_blue}==>${tty_reset} temporary name: ${TEMP_MAME}"
   execute "diskutil" "eraseDisk" "FAT32" "$TEMP_MAME" "MBRFormat" "/dev/${VOLUMES[$i]%s*}"
   
@@ -251,7 +259,7 @@ if [ ${#FAILED[@]} -gt "0" ]; then
   [ ${#TOO_FEW_BIN_FILES[@]}   -gt "0" ] && echo "    ${tty_bold}Failed Check because drive had too few BIN files :${tty_reset} ${tty_red}${#TOO_FEW_BIN_FILES[@]}${tty_reset}"
   [ ${#BIN_FILE_WRONG_SIZE[@]} -gt "0" ] && echo "    ${tty_bold}Failed Check because BIN file was the wrong size :${tty_reset} ${tty_red}${#BIN_FILE_WRONG_SIZE[@]}${tty_reset}"
   echo
-  echo "    run. :  ${0} wipe ${IDENTIFIER} ${IDENTIFIER} 
+  echo "    run. :  ${0} wipe ${IDENTIFIER}
     ${tty_bold}THIS WILL ${tty_red}DELETE${tty_reset} ${tty_bold}ALL FILES ON ALL DRIVES NAMED ${IDENTIFIER}${tty_reset}"
   echo
 fi
