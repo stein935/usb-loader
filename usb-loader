@@ -84,7 +84,9 @@ ID_NUM=$(printf '{print $%s}\n' "$(( 6+${ID_SPACE_COUNT} ))")
 
 #  Mount command
 if [ "${FILE_PATH}" == "test" ]; then
-  ohai "    Woohoo! You're good to go."
+  echo
+  ohai "Woohoo! You're good to go."
+  echo
   exit 0
 fi 
 
